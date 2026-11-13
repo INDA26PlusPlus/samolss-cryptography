@@ -77,16 +77,24 @@ def save():
             HTTPStatus.BAD_REQUEST,
         )
 
+    old_hash = merkle_tree[N_FILES - 1 + file_id]
     blob = b64decode(data.get("blob", None))
     if blob is None:
         return jsonify({"msg": "Blob is empty"}), HTTPStatus.BAD_REQUEST
 
     save_file(file_id, blob)
-    print(merkle_tree[0])
     new_hashes = get_hashes(file_id)
-    return jsonify(
-        {"msg": "success", "file_id": file_id, "hashes": new_hashes}
-    ), HTTPStatus.CREATED
+    return (
+        jsonify(
+            {
+                "msg": "success",
+                "file_id": file_id,
+                "old_file_hash": old_hash.hex(),
+                "hashes": new_hashes,
+            }
+        ),
+        HTTPStatus.CREATED,
+    )
 
 
 @app.route("/get-file/<int:file_id>", methods=["GET"])

@@ -50,9 +50,9 @@ def empty_root():
     return hash
 
 
-def calculate_root_hash(file_id, blob, hashes):
+def calculate_root_hash(file_id, file_hash, hashes):
     current_index = N_FILES - 1 + file_id
-    new_hash = H(blob)
+    new_hash = file_hash
     for hash in hashes:
         l_sibling = new_hash if current_index % 2 == 1 else bytes.fromhex(hash)
         r_sibling = new_hash if current_index % 2 == 0 else bytes.fromhex(hash)
@@ -74,39 +74,45 @@ def verify(json_data):
     file = b64decode(file_b64)
     file_id = json_data.get("file_id")
 
-    total_hash = calculate_root_hash(file_id, file, hashes)
+    total_hash = calculate_root_hash(file_id, H(file), hashes)
 
     return total_hash.hex() == root_hash.hex()
 
 
 def upload_file(key, file_id, file_path):
+
     with open(file_path, "rb") as file:
         blob = file.read()
 
     enc_blob = encrypt(key, blob, file_id)
     data = {"file_id": file_id, "blob": b64encode(enc_blob).decode()}
     r = requests.post("http://127.0.0.1:5000/save", json=data)
-    if r.ok:
-        res_data = r.json()
-        hashes = res_data["hashes"]
-        return True, calculate_root_hash(file_id, enc_blob, hashes)
+    if not r.ok:
+        raise Exception(f"{r.status_code}: {r.json().get('msg', 'Unknown reason')}")
 
-    return False, b""
+    res_data = r.json()
+    old_hash = res_data["old_file_hash"]
+    hashes = res_data["hashes"]
+
+    if root_hash != calculate_root_hash(file_id, bytes.fromhex(old_hash), hashes):
+        raise Exception("Server is trying to trick youuuu....")
+
+    return True, calculate_root_hash(file_id, H(enc_blob), hashes)
 
 
 def get_file(key, file_id, save_to_file_path):
     r = requests.get(f"http://127.0.0.1:5000/get-file/{file_id}")
     if not r.ok:
-        return False
+        raise Exception(f"{r.status_code}: {r.json().get('msg', 'Unkown reason')}")
 
     res_data = r.json()
     verified = verify(res_data)
     if not verified:
-        return False
+        raise Exception(f"Data failed verification")
 
     blob = res_data.get("blob", None)
     if blob is None:
-        return False
+        raise Exception(f"No blob in response")
 
     raw = decrypt(key, b64decode(blob), file_id)
     with open(save_to_file_path, "wb") as out_file:
@@ -160,7 +166,11 @@ if __name__ == "__main__":
                     )
                     continue
 
-                success = get_file(key, file_id, save_to_file_path)
+                try:
+                    success = get_file(key, file_id, save_to_file_path)
+                except Exception as e:
+                    print(f"Something went wrong: {e}")
+                    continue
 
                 if success:
                     print(
@@ -177,7 +187,12 @@ if __name__ == "__main__":
                     print("Bad command. Should be: upload <file_id (int)> <file_path>")
                     continue
 
-                success, new_hash = upload_file(key, file_id, file_path)
+                try:
+                    success, new_hash = upload_file(key, file_id, file_path)
+                except Exception as e:
+                    print(f"Something went wrong: {e}")
+                    continue
+
                 if success:
                     root_hash = new_hash
                     with open("root_hash", "wb") as hash_file:
